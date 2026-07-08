@@ -1,0 +1,16 @@
+.env.local
+.env.production
+*.env
+
+# Go build output
+main
+*.exe
+*.out
+
+# Go dependency cache
+vendor/
+
+# IDE files
+.vscode/
+.idea/
+*.swp

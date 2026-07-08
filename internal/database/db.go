@@ -6,17 +6,17 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/lib/pq" // PostgreSQL driver
+	_ "github.com/lib/pq"
 )
 
 var DB *sql.DB
 
-// Connect establishes a connection to PostgreSQL
+// Connect establishes a connection to PostgreSQL using environment variables
 func Connect() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		// Default local dev connection
-		dsn = "host=localhost user=postgres password=Astrocoder1 dbname=E-voting sslmode=disable"
+		// Fallback for local dev — set your values in .env file, NOT here
+		log.Fatal("DATABASE_URL environment variable is not set. Please create a .env file.")
 	}
 
 	var err error
@@ -29,13 +29,12 @@ func Connect() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	log.Println("Database connected successfully")
+	log.Println("✅ Database connected successfully")
 }
 
 // CreateTables runs the SQL to set up all tables if they don't exist
 func CreateTables() {
 	schema := `
-	-- Users table (students + admins)
 	CREATE TABLE IF NOT EXISTS users (
 		id            SERIAL PRIMARY KEY,
 		matric_number VARCHAR(20) UNIQUE NOT NULL,
@@ -49,7 +48,6 @@ func CreateTables() {
 		created_at    TIMESTAMP NOT NULL DEFAULT NOW()
 	);
 
-	-- Elections table
 	CREATE TABLE IF NOT EXISTS elections (
 		id          SERIAL PRIMARY KEY,
 		title       VARCHAR(200) NOT NULL,
@@ -60,7 +58,6 @@ func CreateTables() {
 		created_at  TIMESTAMP NOT NULL DEFAULT NOW()
 	);
 
-	-- Candidates table
 	CREATE TABLE IF NOT EXISTS candidates (
 		id          SERIAL PRIMARY KEY,
 		election_id INT NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
@@ -71,8 +68,6 @@ func CreateTables() {
 		vote_count  INT NOT NULL DEFAULT 0
 	);
 
-	-- Votes table — the actual ballot ledger
-	-- The UNIQUE constraint on (user_id, election_id) enforces ONE STUDENT ONE VOTE
 	CREATE TABLE IF NOT EXISTS votes (
 		id           SERIAL PRIMARY KEY,
 		user_id      INT NOT NULL REFERENCES users(id),
@@ -80,10 +75,9 @@ func CreateTables() {
 		candidate_id INT NOT NULL REFERENCES candidates(id),
 		vote_receipt VARCHAR(64) NOT NULL UNIQUE,
 		cast_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-		UNIQUE (user_id, election_id)   -- This is the "one student, one vote" enforcement
+		UNIQUE (user_id, election_id)
 	);
 
-	-- Audit logs for transparency
 	CREATE TABLE IF NOT EXISTS audit_logs (
 		id         SERIAL PRIMARY KEY,
 		user_id    INT REFERENCES users(id),

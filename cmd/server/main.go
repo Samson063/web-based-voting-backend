@@ -10,20 +10,27 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	// Step 1: Connect to the database
+	// Step 1: Load .env file (only works locally — on Render use dashboard env vars)
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("⚠️  No .env file found — using system environment variables")
+	}
+
+	// Step 2: Connect to the database
 	database.Connect()
 	database.CreateTables()
 
-	// Step 2: Create the Fiber app (our web server)
+	// Step 3: Create the Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "UniVote E-Voting System",
 		ErrorHandler: errorHandler,
 	})
 
-	// Step 3: Attach middleware
+	// Step 4: Attach middleware
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -31,10 +38,10 @@ func main() {
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE",
 	}))
 
-	// Step 4: Define API routes
+	// Step 5: Define API routes
 	api := app.Group("/api")
 
-	// --- Public routes (no login needed) ---
+	// --- Public routes ---
 	auth := api.Group("/auth")
 	auth.Post("/register", handlers.Register)
 	auth.Post("/login", handlers.Login)
@@ -42,13 +49,13 @@ func main() {
 	// Public stats for the landing page
 	api.Get("/stats", handlers.GetPublicStats)
 
-	// Public: view elections and results (transparency)
+	// Public: view elections and results
 	api.Get("/elections", handlers.GetElections)
 	api.Get("/elections/:election_id/candidates", handlers.GetCandidates)
 	api.Get("/elections/:election_id/results", handlers.GetResults)
 	api.Get("/verify/:receipt", handlers.VerifyReceipt)
 
-	// --- Protected voter routes (must be logged in) ---
+	// --- Protected voter routes ---
 	voter := api.Group("/voter", middleware.Protected())
 	voter.Get("/me", handlers.GetMe)
 	voter.Post("/vote", handlers.CastVote)
@@ -63,7 +70,7 @@ func main() {
 	admin.Post("/candidates", handlers.AddCandidate)
 	admin.Get("/audit-logs", handlers.GetAuditLogs)
 
-	// Step 5: Start the server
+	// Step 6: Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
