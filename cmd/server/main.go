@@ -14,31 +14,29 @@ import (
 )
 
 func main() {
-	// Step 1: Load .env file (only works locally — on Render use dashboard env vars)
+	// Load .env file locally — on Render, env vars are set in the dashboard
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("⚠️  No .env file found — using system environment variables")
+		log.Println("⚠️  No .env file — using system environment variables")
 	}
 
-	// Step 2: Connect to the database
 	database.Connect()
 	database.CreateTables()
 
-	// Step 3: Create the Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "UniVote E-Voting System",
 		ErrorHandler: errorHandler,
 	})
 
-	// Step 4: Attach middleware
 	app.Use(logger.New())
+
+	// Allow requests from your deployed Vercel frontend
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: "https://bouestivote.vercel.app, http://localhost:3000",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE",
 	}))
 
-	// Step 5: Define API routes
 	api := app.Group("/api")
 
 	// --- Public routes ---
@@ -46,10 +44,7 @@ func main() {
 	auth.Post("/register", handlers.Register)
 	auth.Post("/login", handlers.Login)
 
-	// Public stats for the landing page
 	api.Get("/stats", handlers.GetPublicStats)
-
-	// Public: view elections and results
 	api.Get("/elections", handlers.GetElections)
 	api.Get("/elections/:election_id/candidates", handlers.GetCandidates)
 	api.Get("/elections/:election_id/results", handlers.GetResults)
@@ -70,7 +65,6 @@ func main() {
 	admin.Post("/candidates", handlers.AddCandidate)
 	admin.Get("/audit-logs", handlers.GetAuditLogs)
 
-	// Step 6: Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
