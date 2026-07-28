@@ -97,8 +97,8 @@ func CastVote(c *fiber.Ctx) error {
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "Election not found"})
 	}
-	now := time.Now()
-	if !election.IsActive || now.Before(election.StartTime) || now.After(election.EndTime) {
+	now := time.Now().UTC()
+	if !election.IsActive || now.Before(election.StartTime.UTC()) || now.After(election.EndTime.UTC()) {
 		return c.Status(403).JSON(fiber.Map{"error": "This election is not currently open for voting"})
 	}
 

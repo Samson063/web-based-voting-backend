@@ -41,7 +41,7 @@ func CreateElection(c *fiber.Ctx) error {
 	parseTime := func(s string) (time.Time, error) {
 		for _, layout := range layouts {
 			if t, err := time.Parse(layout, s); err == nil {
-				return t, nil
+				return t.UTC(), nil // ← add .UTC() here
 			}
 		}
 		return time.Time{}, fmt.Errorf("cannot parse date: %s", s)
