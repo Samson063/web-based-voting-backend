@@ -11,7 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// GetElections returns all elections (active or all for admin)
+// GetElections returns all elections
 func GetElections(c *fiber.Ctx) error {
 	rows, err := database.DB.Query(`
 		SELECT id, title, description, start_time, end_time, is_active, created_at
@@ -62,8 +62,7 @@ func GetCandidates(c *fiber.Ctx) error {
 	return c.JSON(candidates)
 }
 
-// CastVote records a vote — the core function of the system
-// The database UNIQUE constraint ensures one student one vote at the DB level
+// CastVote records a vote — enforces one vote per election per student
 func CastVote(c *fiber.Ctx) error {
 	userID := c.Locals("userID").(int)
 
@@ -73,11 +72,10 @@ func CastVote(c *fiber.Ctx) error {
 	}
 
 	// --- Step 1: Check voter eligibility ---
-	// --- Step 1: Check voter eligibility ---
 	var isEligible bool
 	err := database.DB.QueryRow(`
-				SELECT is_eligible FROM users WHERE id = $1
-			`, userID).Scan(&isEligible)
+		SELECT is_eligible FROM users WHERE id = $1
+	`, userID).Scan(&isEligible)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Could not verify eligibility"})
@@ -86,17 +84,17 @@ func CastVote(c *fiber.Ctx) error {
 		return c.Status(403).JSON(fiber.Map{"error": "You are not eligible to vote in this election"})
 	}
 
-	// Check if user already voted in THIS specific election (not globally)
+	// --- Step 2: Check if user already voted in THIS specific election ---
 	var alreadyVoted bool
 	database.DB.QueryRow(`
-				SELECT EXISTS(SELECT 1 FROM votes WHERE user_id = $1 AND election_id = $2)
-			`, userID, req.ElectionID).Scan(&alreadyVoted)
+		SELECT EXISTS(SELECT 1 FROM votes WHERE user_id = $1 AND election_id = $2)
+	`, userID, req.ElectionID).Scan(&alreadyVoted)
 
 	if alreadyVoted {
 		return c.Status(409).JSON(fiber.Map{"error": "You have already voted in this election"})
 	}
 
-	// --- Step 2: Check that election is active ---
+	// --- Step 3: Check that election is active ---
 	var election models.Election
 	err = database.DB.QueryRow(`
 		SELECT id, is_active, start_time, end_time FROM elections WHERE id = $1
@@ -105,19 +103,22 @@ func CastVote(c *fiber.Ctx) error {
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "Election not found"})
 	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not verify election"})
+	}
+
 	now := time.Now().UTC()
 	if !election.IsActive || now.Before(election.StartTime.UTC()) || now.After(election.EndTime.UTC()) {
 		return c.Status(403).JSON(fiber.Map{"error": "This election is not currently open for voting"})
 	}
 
-	// --- Step 3: Use a database TRANSACTION to safely record the vote ---
-	// A transaction ensures both operations succeed or both fail together
+	// --- Step 4: Use a database TRANSACTION to safely record the vote ---
 	tx, err := database.DB.Begin()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to begin transaction"})
 	}
 
-	// Generate a unique vote receipt (hash of userID + electionID + timestamp)
+	// Generate a unique vote receipt
 	receiptData := fmt.Sprintf("%d-%d-%d-%s", userID, req.ElectionID, req.CandidateID, time.Now().String())
 	receipt := fmt.Sprintf("%x", sha256.Sum256([]byte(receiptData)))
 
@@ -142,13 +143,7 @@ func CastVote(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to update vote count"})
 	}
 
-	// Mark user as having voted
-	if err != nil {
-		tx.Rollback()
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to update voter status"})
-	}
-
-	// Commit the transaction — all or nothing
+	// Commit the transaction
 	if err = tx.Commit(); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to record vote"})
 	}
@@ -166,7 +161,6 @@ func CastVote(c *fiber.Ctx) error {
 func GetResults(c *fiber.Ctx) error {
 	electionID := c.Params("election_id")
 
-	// Get the election details
 	var election models.Election
 	err := database.DB.QueryRow(`
 		SELECT id, title, description, start_time, end_time, is_active, created_at
@@ -178,8 +172,10 @@ func GetResults(c *fiber.Ctx) error {
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "Election not found"})
 	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch election"})
+	}
 
-	// Get candidates with vote counts
 	rows, err := database.DB.Query(`
 		SELECT id, election_id, full_name, position, department, manifesto, vote_count
 		FROM candidates WHERE election_id = $1 ORDER BY position, vote_count DESC
@@ -225,6 +221,9 @@ func VerifyReceipt(c *fiber.Ctx) error {
 			"valid":   false,
 			"message": "Receipt not found — vote may not have been recorded",
 		})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to verify receipt"})
 	}
 
 	return c.JSON(fiber.Map{
