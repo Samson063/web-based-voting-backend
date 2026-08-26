@@ -73,10 +73,11 @@ func CastVote(c *fiber.Ctx) error {
 	}
 
 	// --- Step 1: Check voter eligibility ---
-	var isEligible, hasVoted bool
+	// --- Step 1: Check voter eligibility ---
+	var isEligible bool
 	err := database.DB.QueryRow(`
-		SELECT is_eligible, has_voted FROM users WHERE id = $1
-	`, userID).Scan(&isEligible, &hasVoted)
+				SELECT is_eligible FROM users WHERE id = $1
+			`, userID).Scan(&isEligible)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Could not verify eligibility"})
@@ -84,8 +85,15 @@ func CastVote(c *fiber.Ctx) error {
 	if !isEligible {
 		return c.Status(403).JSON(fiber.Map{"error": "You are not eligible to vote in this election"})
 	}
-	if hasVoted {
-		return c.Status(409).JSON(fiber.Map{"error": "You have already cast your vote"})
+
+	// Check if user already voted in THIS specific election (not globally)
+	var alreadyVoted bool
+	database.DB.QueryRow(`
+				SELECT EXISTS(SELECT 1 FROM votes WHERE user_id = $1 AND election_id = $2)
+			`, userID, req.ElectionID).Scan(&alreadyVoted)
+
+	if alreadyVoted {
+		return c.Status(409).JSON(fiber.Map{"error": "You have already voted in this election"})
 	}
 
 	// --- Step 2: Check that election is active ---
@@ -135,7 +143,6 @@ func CastVote(c *fiber.Ctx) error {
 	}
 
 	// Mark user as having voted
-	_, err = tx.Exec(`UPDATE users SET has_voted = TRUE WHERE id = $1`, userID)
 	if err != nil {
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to update voter status"})
