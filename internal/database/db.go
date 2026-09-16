@@ -48,6 +48,16 @@ func CreateTables() {
 		created_at    TIMESTAMP NOT NULL DEFAULT NOW()
 	);
 
+	CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id                  SERIAL PRIMARY KEY,
+    user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id       BYTEA NOT NULL UNIQUE,
+    public_key          BYTEA NOT NULL,
+    sign_count          BIGINT NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_used_at        TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS elections (
 		id          SERIAL PRIMARY KEY,
 		title       VARCHAR(200) NOT NULL,
