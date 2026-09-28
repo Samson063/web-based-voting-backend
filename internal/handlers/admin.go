@@ -124,7 +124,9 @@ func AddCandidate(c *fiber.Ctx) error {
 // GetAllUsers returns all registered voters (admin only)
 func GetAllUsers(c *fiber.Ctx) error {
 	rows, err := database.DB.Query(`
-		SELECT id, matric_number, full_name, email, department, role, is_eligible, has_voted, created_at
+		SELECT id, matric_number, full_name, email, department, role, is_eligible,
+		       EXISTS(SELECT 1 FROM votes v WHERE v.user_id = users.id) AS has_voted,
+		       created_at
 		FROM users ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -180,16 +182,19 @@ func GetAuditLogs(c *fiber.Ctx) error {
 
 // GetDashboardStats returns summary numbers for the admin dashboard
 func GetDashboardStats(c *fiber.Ctx) error {
-	var totalVoters, totalVoted, totalElections, totalCandidates int
+	var totalVoters, totalVoted, uniqueVoters, totalElections, totalCandidates int
 
 	database.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'voter'`).Scan(&totalVoters)
-	database.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE has_voted = TRUE`).Scan(&totalVoted)
+	// Count from the votes table itself. users.has_voted is never updated when
+	// a vote is cast, so it always read 0.
+	database.DB.QueryRow(`SELECT COUNT(*) FROM votes`).Scan(&totalVoted)
+	database.DB.QueryRow(`SELECT COUNT(DISTINCT user_id) FROM votes`).Scan(&uniqueVoters)
 	database.DB.QueryRow(`SELECT COUNT(*) FROM elections`).Scan(&totalElections)
 	database.DB.QueryRow(`SELECT COUNT(*) FROM candidates`).Scan(&totalCandidates)
 
 	turnout := 0.0
 	if totalVoters > 0 {
-		turnout = float64(totalVoted) / float64(totalVoters) * 100
+		turnout = float64(uniqueVoters) / float64(totalVoters) * 100
 	}
 
 	return c.JSON(fiber.Map{
