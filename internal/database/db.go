@@ -104,6 +104,15 @@ func CreateTables() {
 
 	CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user
 		ON webauthn_credentials(user_id);
+
+	-- Official list of BOUESTI students allowed to register. Uploaded by an
+	-- admin. While this table is empty, registration stays open.
+	CREATE TABLE IF NOT EXISTS student_roster (
+		matric_number VARCHAR(20) PRIMARY KEY,
+		full_name     VARCHAR(100) NOT NULL DEFAULT '',
+		department    VARCHAR(100) NOT NULL DEFAULT '',
+		created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+	);
 	`
 
 	_, err := DB.Exec(schema)

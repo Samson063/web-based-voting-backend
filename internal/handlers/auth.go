@@ -4,6 +4,7 @@ import (
 	"evoting/internal/database"
 	"evoting/internal/middleware"
 	"evoting/internal/models"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -21,6 +22,16 @@ func Register(c *fiber.Ctx) error {
 	// Basic validation
 	if req.MatricNumber == "" || req.FullName == "" || req.Email == "" || req.Password == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "All fields are required"})
+	}
+
+	// Only students on the official BOUESTI roster may register
+	req.MatricNumber = strings.TrimSpace(req.MatricNumber)
+	dept, allowed, reason := checkRoster(req.MatricNumber, req.FullName)
+	if !allowed {
+		return c.Status(403).JSON(fiber.Map{"error": reason})
+	}
+	if dept != "" {
+		req.Department = dept
 	}
 
 	// Hash the password — NEVER store plain text passwords

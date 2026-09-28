@@ -79,6 +79,10 @@ func main() {
 	admin.Patch("/users/:id/eligibility", handlers.SetEligibility)
 	admin.Post("/elections", handlers.CreateElection)
 	admin.Patch("/elections/:id/toggle", handlers.ToggleElection)
+	admin.Delete("/elections/:id", handlers.DeleteElection)
+	admin.Get("/roster", handlers.RosterSummary)
+	admin.Post("/roster", handlers.UploadRoster)
+	admin.Delete("/roster", handlers.ClearRoster)
 	admin.Post("/candidates", handlers.AddCandidate)
 	admin.Get("/audit-logs", handlers.GetAuditLogs)
 
