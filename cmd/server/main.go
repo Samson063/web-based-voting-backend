@@ -62,13 +62,15 @@ func main() {
 	// --- Protected voter routes ---
 	voter := api.Group("/voter", middleware.Protected())
 	voter.Get("/me", handlers.GetMe)
-	voter.Post("/vote", handlers.CastVote)
+	voter.Post("/vote", middleware.BiometricRequired(), handlers.CastVote)
 
 	// Enrolling and managing biometric unlock requires an existing session.
 	voter.Get("/passkey", handlers.ListPasskeys)
 	voter.Delete("/passkey/:id", handlers.DeletePasskey)
 	voter.Post("/passkey/register/begin", handlers.BeginPasskeyRegistration)
 	voter.Post("/passkey/register/finish", handlers.FinishPasskeyRegistration)
+	voter.Post("/passkey/verify/begin", handlers.BeginBiometricVerify)
+	voter.Post("/passkey/verify/finish", handlers.FinishBiometricVerify)
 
 	// --- Admin-only routes ---
 	admin := api.Group("/admin", middleware.Protected(), middleware.AdminOnly())

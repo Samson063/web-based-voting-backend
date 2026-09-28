@@ -118,8 +118,16 @@ func FinishPasskeyRegistration(c *fiber.Ctx) error {
 
 	logAudit(userID, "PASSKEY_ENROLLED", "Biometric unlock enabled on "+label, c.IP())
 
+	// Enrollment required user verification (fingerprint/face/PIN), so this
+	// session is now biometrically verified.
+	tokenStr, err := issueJWT(record, true)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+	}
+
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Biometric unlock enabled for this device",
+		"token":   tokenStr,
 	})
 }
 
@@ -254,12 +262,101 @@ func FinishPasskeyLogin(c *fiber.Ctx) error {
 
 	_ = passkey.TouchCredential(credential)
 
-	tokenStr, err := issuePasskeyJWT(record)
+	tokenStr, err := issueJWT(record, true)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
 	}
 
 	logAudit(record.ID, "LOGIN_BIOMETRIC", "User logged in with biometric unlock", c.IP())
+
+	record.PasswordHash = ""
+	return c.JSON(models.LoginResponse{Token: tokenStr, User: record})
+}
+
+// ---------------------------------------------------------------------------
+// Step-up: an already password-authenticated user proves presence with a
+// fingerprint / face scan and receives a biometrically verified token.
+// ---------------------------------------------------------------------------
+
+// BeginBiometricVerify issues an assertion challenge for the logged-in user.
+// POST /api/voter/passkey/verify/begin
+func BeginBiometricVerify(c *fiber.Ctx) error {
+	userID := c.Locals("userID").(int)
+
+	record, err := passkey.FindUserByID(userID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+	user, err := passkey.NewUser(record)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not load passkeys"})
+	}
+	if len(user.Credentials) == 0 {
+		return c.Status(409).JSON(fiber.Map{
+			"error": "No fingerprint or face unlock is set up yet",
+			"code":  "no_passkey",
+		})
+	}
+
+	options, session, err := passkey.Instance.BeginLogin(
+		user,
+		webauthn.WithUserVerification(protocol.VerificationRequired),
+	)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not start verification"})
+	}
+	handle, err := passkey.PutSession(userID, session)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not store challenge"})
+	}
+	return c.JSON(fiber.Map{"session_id": handle, "options": options.Response})
+}
+
+// FinishBiometricVerify checks the scan and upgrades the session token.
+// POST /api/voter/passkey/verify/finish
+func FinishBiometricVerify(c *fiber.Ctx) error {
+	userID := c.Locals("userID").(int)
+
+	var req finishLoginRequest
+	if err := c.BodyParser(&req); err != nil || len(req.Credential) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	sessionUserID, session, ok := passkey.TakeSession(req.SessionID)
+	if !ok || sessionUserID != userID {
+		return c.Status(400).JSON(fiber.Map{"error": "Verification session expired. Please try again."})
+	}
+
+	parsed, err := protocol.ParseCredentialRequestResponseBody(bytes.NewReader(req.Credential))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Malformed authenticator response"})
+	}
+
+	record, err := passkey.FindUserByID(userID)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+	user, err := passkey.NewUser(record)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not load passkeys"})
+	}
+
+	credential, err := passkey.Instance.ValidateLogin(user, session, parsed)
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Biometric verification failed"})
+	}
+	if credential.Authenticator.CloneWarning {
+		logAudit(userID, "PASSKEY_CLONE_WARNING", "Signature counter regression on step-up", c.IP())
+		return c.Status(401).JSON(fiber.Map{"error": "This passkey failed a security check."})
+	}
+	_ = passkey.TouchCredential(credential)
+
+	tokenStr, err := issueJWT(record, true)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to generate token"})
+	}
+
+	logAudit(userID, "BIOMETRIC_VERIFIED", "Session verified with biometric unlock", c.IP())
 
 	record.PasswordHash = ""
 	return c.JSON(models.LoginResponse{Token: tokenStr, User: record})
@@ -299,11 +396,13 @@ func DeletePasskey(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "Passkey removed"})
 }
 
-// issuePasskeyJWT mirrors the token issued by the password Login handler.
-func issuePasskeyJWT(user models.User) (string, error) {
+// issueJWT mirrors the token issued by the password Login handler, with the
+// biometric flag set according to how the session was authenticated.
+func issueJWT(user models.User, bio bool) (string, error) {
 	claims := middleware.JWTClaims{
 		UserID: user.ID,
 		Role:   user.Role,
+		Bio:    bio,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(8 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
