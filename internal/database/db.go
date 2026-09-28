@@ -48,16 +48,6 @@ func CreateTables() {
 		created_at    TIMESTAMP NOT NULL DEFAULT NOW()
 	);
 
-	CREATE TABLE IF NOT EXISTS webauthn_credentials (
-    id                  SERIAL PRIMARY KEY,
-    user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    credential_id       BYTEA NOT NULL UNIQUE,
-    public_key          BYTEA NOT NULL,
-    sign_count          BIGINT NOT NULL DEFAULT 0,
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_used_at        TIMESTAMP
-	);
-
 	CREATE TABLE IF NOT EXISTS elections (
 		id          SERIAL PRIMARY KEY,
 		title       VARCHAR(200) NOT NULL,
@@ -96,6 +86,24 @@ func CreateTables() {
 		ip_address VARCHAR(50),
 		created_at TIMESTAMP NOT NULL DEFAULT NOW()
 	);
+
+	-- Fingerprint / Face unlock (WebAuthn passkeys).
+	-- Only the device's PUBLIC key is stored here. The fingerprint or face scan
+	-- itself never leaves the student's phone or laptop and is never sent to
+	-- this server, so there is no biometric data in this database to leak.
+	CREATE TABLE IF NOT EXISTS webauthn_credentials (
+		id              SERIAL PRIMARY KEY,
+		user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		credential_id   TEXT NOT NULL UNIQUE,
+		credential_data JSONB NOT NULL,
+		device_label    VARCHAR(100) NOT NULL DEFAULT 'This device',
+		sign_count      BIGINT NOT NULL DEFAULT 0,
+		created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+		last_used_at    TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user
+		ON webauthn_credentials(user_id);
 	`
 
 	_, err := DB.Exec(schema)
