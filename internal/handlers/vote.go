@@ -97,8 +97,8 @@ func CastVote(c *fiber.Ctx) error {
 	// --- Step 3: Check that election is active ---
 	var election models.Election
 	err = database.DB.QueryRow(`
-		SELECT id, is_active, start_time, end_time FROM elections WHERE id = $1
-	`, req.ElectionID).Scan(&election.ID, &election.IsActive, &election.StartTime, &election.EndTime)
+		SELECT id, is_active FROM elections WHERE id = $1
+	`, req.ElectionID).Scan(&election.ID, &election.IsActive)
 
 	if err == sql.ErrNoRows {
 		return c.Status(404).JSON(fiber.Map{"error": "Election not found"})
@@ -107,8 +107,7 @@ func CastVote(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Could not verify election"})
 	}
 
-	now := time.Now().UTC()
-	if !election.IsActive || now.Before(election.StartTime.UTC()) || now.After(election.EndTime.UTC()) {
+	if !election.IsActive {
 		return c.Status(403).JSON(fiber.Map{"error": "This election is not currently open for voting"})
 	}
 
